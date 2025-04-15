@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Data and output files
+data/*.csv
+analysis/*.csv
+strategies/*.csv
+entry_exit_points/*.csv
+visualizations/*.png
+batch_processing/*.csv
+batch_processing/data/
+batch_processing/analysis/
+batch_processing/visualizations/
+
+# OS specific
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

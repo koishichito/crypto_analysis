@@ -9,15 +9,17 @@ from technical_indicator_analyzer import analyze_all_coins
 from trading_strategy_creator import create_trading_strategies
 from entry_exit_point_generator import generate_all_entry_exit_points
 from expanded_visualizations import create_visualization_for_all_coins
-from config import COINS
+from config import COINS, LINE_CHANNEL_TOKEN, LINE_USER_ID
+from line_messaging_api import LineMessagingApi
 
-def run_analysis_pipeline(interval="5m", limit=100):
+def run_analysis_pipeline(interval="5m", limit=100, send_line_notification=True):
     """
     Run the complete cryptocurrency analysis pipeline
     
     Args:
         interval: Time interval for data collection (1m, 5m, 15m, 30m, 1h, 1d)
         limit: Number of data points to retrieve
+        send_line_notification: Whether to send results to LINE
     """
     print("=" * 50)
     print(f"CRYPTOCURRENCY ANALYSIS PIPELINE START: {datetime.now()}")
@@ -74,6 +76,35 @@ def run_analysis_pipeline(interval="5m", limit=100):
     charts_created = create_visualization_for_all_coins("analysis", signals_df)
     print(f"Created {len(charts_created)} visualization charts.")
     
+    # Step 6: Send LINE notification with results
+    if send_line_notification and not points_df.empty:
+        print("\n[STEP 6] Sending LINE notification...")
+        try:
+            # Prepare summary data for LINE notification
+            summary_data = []
+            for _, row in points_df.iterrows():
+                summary_data.append({
+                    "coin": row["coin"],
+                    "signal": row["signal"],
+                    "confidence": row["confidence"],
+                    "price": row["price"],
+                    "entry_point": row["entry_point"],
+                    "exit_point": row["exit_point"]
+                })
+            
+            # Initialize LINE client
+            line_client = LineMessagingApi(LINE_CHANNEL_TOKEN, LINE_USER_ID)
+            
+            # Send analysis report
+            result = line_client.send_analysis_report(summary_data)
+            
+            if result:
+                print("✅ LINE notification sent successfully!")
+            else:
+                print("❌ Failed to send LINE notification. Check credentials.")
+        except Exception as e:
+            print(f"❌ Error sending LINE notification: {str(e)}")
+    
     print("\n" + "=" * 50)
     print(f"CRYPTOCURRENCY ANALYSIS PIPELINE COMPLETE: {datetime.now()}")
     print("=" * 50)
@@ -101,6 +132,9 @@ def parse_arguments():
     parser.add_argument("--limit", type=int, default=100,
                         help="Number of data points to retrieve")
     
+    parser.add_argument("--no-line", action="store_true",
+                        help="Disable LINE notification")
+    
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -108,4 +142,4 @@ if __name__ == "__main__":
     args = parse_arguments()
     
     # Run the complete analysis pipeline
-    results = run_analysis_pipeline(args.interval, args.limit)
+    results = run_analysis_pipeline(args.interval, args.limit, not args.no_line)

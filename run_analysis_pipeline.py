@@ -9,8 +9,12 @@ from technical_indicator_analyzer import analyze_all_coins
 from trading_strategy_creator import create_trading_strategies
 from entry_exit_point_generator import generate_all_entry_exit_points
 from expanded_visualizations import create_visualization_for_all_coins
-from config import COINS, LINE_CHANNEL_TOKEN, LINE_USER_ID
+from config import COINS
 from line_messaging_api import LineMessagingApi
+
+# Retrieve LINE credentials from environment variables
+LINE_CHANNEL_TOKEN = os.environ.get('LINE_CHANNEL_TOKEN')
+LINE_USER_ID = os.environ.get('LINE_USER_ID')
 
 def run_analysis_pipeline(interval="5m", limit=100, send_line_notification=True):
     """
@@ -77,7 +81,7 @@ def run_analysis_pipeline(interval="5m", limit=100, send_line_notification=True)
     print(f"Created {len(charts_created)} visualization charts.")
     
     # Step 6: Send LINE notification with results
-    if send_line_notification and not points_df.empty:
+    if send_line_notification and not points_df.empty and LINE_CHANNEL_TOKEN and LINE_USER_ID:
         print("\n[STEP 6] Sending LINE notification...")
         try:
             # Prepare summary data for LINE notification
@@ -92,7 +96,7 @@ def run_analysis_pipeline(interval="5m", limit=100, send_line_notification=True)
                     "exit_point": row["exit_point"]
                 })
             
-            # Initialize LINE client
+            # Initialize LINE client using environment variables
             line_client = LineMessagingApi(LINE_CHANNEL_TOKEN, LINE_USER_ID)
             
             # Send analysis report
@@ -101,9 +105,11 @@ def run_analysis_pipeline(interval="5m", limit=100, send_line_notification=True)
             if result:
                 print("✅ LINE notification sent successfully!")
             else:
-                print("❌ Failed to send LINE notification. Check credentials.")
+                print("❌ Failed to send LINE notification. Check logs and credentials.")
         except Exception as e:
             print(f"❌ Error sending LINE notification: {str(e)}")
+    elif send_line_notification:
+        print("\n[STEP 6] Skipped LINE notification: LINE_CHANNEL_TOKEN or LINE_USER_ID not set in environment variables.")
     
     print("\n" + "=" * 50)
     print(f"CRYPTOCURRENCY ANALYSIS PIPELINE COMPLETE: {datetime.now()}")

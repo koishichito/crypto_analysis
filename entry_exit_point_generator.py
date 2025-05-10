@@ -1,14 +1,140 @@
 import pandas as pd
 import numpy as np
 import os
+from typing import Dict, Optional, Tuple
+import talib
 
 # Import settings
-from config import COINS
+from config import (
+    COINS,
+    DONCHIAN_PERIOD,
+    ADX_PERIOD,
+    ADX_THRESHOLD,
+    ATR_PERIOD,
+    ATR_MULTIPLIER_SL,
+    ATR_MULTIPLIER_TP,
+    POSITION_SIZE_PERCENT,
+    LEVERAGE,
+    SYMBOL,
+    INTERVAL,
+    PHASE_THRESHOLDS,
+    PHASE_LOT_FACTOR
+)
 
 # Directory settings
 STRATEGY_DIR = "strategies"
 ENTRY_EXIT_DIR = "entry_exit_points"
 os.makedirs(ENTRY_EXIT_DIR, exist_ok=True)
+
+def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate Donchian Channels, ADX, and ATR
+    
+    Args:
+        df: DataFrame with OHLCV data
+        
+    Returns:
+        DataFrame with added indicators
+    """
+    # Calculate Donchian Channels
+    df['DonchianHigh'] = df['High'].rolling(window=DONCHIAN_PERIOD).max()
+    df['DonchianLow'] = df['Low'].rolling(window=DONCHIAN_PERIOD).min()
+    
+    # Calculate ADX
+    df['ADX'] = talib.ADX(df['High'], df['Low'], df['Close'], timeperiod=ADX_PERIOD)
+    
+    # Calculate ATR
+    df['ATR'] = talib.ATR(df['High'], df['Low'], df['Close'], timeperiod=ATR_PERIOD)
+    
+    return df
+
+def generate_signal(df: pd.DataFrame) -> Optional[Dict]:
+    """
+    Generate trading signal based on Donchian breakout and ADX filter
+    
+    Args:
+        df: DataFrame with indicators
+        
+    Returns:
+        Dictionary with signal information or None if no signal
+    """
+    if df is None or df.empty:
+        return None
+    
+    # Get latest data
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    
+    # Check if ADX is above threshold
+    if latest['ADX'] < ADX_THRESHOLD:
+        return None
+    
+    # Check for Donchian breakout
+    signal = None
+    if latest['Close'] > latest['DonchianHigh'] and prev['Close'] <= prev['DonchianHigh']:
+        signal = "BUY"
+    elif latest['Close'] < latest['DonchianLow'] and prev['Close'] >= prev['DonchianLow']:
+        signal = "SELL"
+    
+    if signal:
+        return {
+            'timestamp': latest['OpenTime'],
+            'price': latest['Close'],
+            'signal': signal,
+            'atr': latest['ATR']
+        }
+    
+    return None
+
+def generate_trade_parameters(signal: Dict, balance: float) -> Dict:
+    """
+    Generate trade parameters based on signal and current balance
+    
+    Args:
+        signal: Signal dictionary
+        balance: Current account balance
+        
+    Returns:
+        Dictionary with trade parameters
+    """
+    entry_price = signal['price']
+    atr = signal['atr']
+    
+    # Calculate stop loss and take profit levels
+    if signal['signal'] == "BUY":
+        stop_loss = entry_price - (ATR_MULTIPLIER_SL * atr)
+        take_profit = entry_price + (ATR_MULTIPLIER_TP * atr)
+    else:  # SELL
+        stop_loss = entry_price + (ATR_MULTIPLIER_SL * atr)
+        take_profit = entry_price - (ATR_MULTIPLIER_TP * atr)
+    
+    # Calculate position size
+    risk_amount = balance * POSITION_SIZE_PERCENT
+    position_size = (risk_amount * LEVERAGE) / (abs(entry_price - stop_loss))
+    
+    return {
+        'entry_price': entry_price,
+        'stop_loss': stop_loss,
+        'take_profit': take_profit,
+        'position_size': position_size,
+        'balance': balance
+    }
+
+def get_phase(balance: float) -> Tuple[int, float]:
+    """
+    Determine current phase and lot factor based on balance
+    
+    Args:
+        balance: Current account balance
+        
+    Returns:
+        Tuple of (phase_number, lot_factor)
+    """
+    for i, threshold in enumerate(PHASE_THRESHOLDS, 1):
+        if balance < threshold:
+            return i, PHASE_LOT_FACTOR[i]
+    
+    return len(PHASE_THRESHOLDS), PHASE_LOT_FACTOR[len(PHASE_THRESHOLDS)]
 
 def generate_entry_exit_points(df, risk_reward_ratio=5.0):
     """
@@ -129,6 +255,26 @@ def generate_all_entry_exit_points(coins=COINS):
     return results, points_df
 
 if __name__ == "__main__":
+    # Test the functions
+    from crypto_data_collector import get_latest_data
+    
+    # Get latest data
+    df = get_latest_data()
+    if df is not None:
+        # Calculate indicators
+        df = calculate_indicators(df)
+        
+        # Generate signal
+        signal = generate_signal(df)
+        if signal:
+            print("\nSignal generated:")
+            print(signal)
+            
+            # Generate trade parameters
+            trade_params = generate_trade_parameters(signal, 15000)
+            print("\nTrade parameters:")
+            print(trade_params)
+    
     # Generate entry/exit points for all cryptocurrencies
     results, points_df = generate_all_entry_exit_points()
     

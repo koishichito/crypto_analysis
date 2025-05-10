@@ -3,97 +3,90 @@ import pandas as pd
 import os
 from datetime import datetime
 import time
+from typing import Optional, Dict, Any
 
-# Import API key and coin list from config
-from config import API_KEY, COINS
+from config import (
+    BINANCE_API_KEY,
+    SYMBOL,
+    INTERVAL,
+    DATA_DIR
+)
 
-# Data directory
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-def fetch_crypto_data(coin, limit=100, interval="5m"):
+def fetch_ohlc_data(symbol: str = SYMBOL, interval: str = INTERVAL, limit: int = 100) -> Optional[pd.DataFrame]:
     """
-    Fetch cryptocurrency data from CryptoCompare API
+    Fetch OHLCV data from Binance API
     
     Args:
-        coin: Cryptocurrency symbol (e.g., BTC)
-        limit: Number of data points to retrieve
+        symbol: Trading pair symbol (e.g., BTCUSDT)
         interval: Time interval (1m, 5m, 15m, 30m, 1h, 1d)
+        limit: Number of data points to retrieve
         
     Returns:
-        DataFrame: Retrieved data
+        DataFrame with columns: OpenTime, Open, High, Low, Close, Volume
     """
-    # Choose API endpoint based on interval
-    if interval in ["1m", "5m", "15m", "30m"]:
-        url = "https://min-api.cryptocompare.com/data/v2/histominute"
-        if interval == "1m":
-            aggregate = 1
-        elif interval == "5m":
-            aggregate = 5
-        elif interval == "15m":
-            aggregate = 15
-        else:  # 30m
-            aggregate = 30
-    elif interval == "1h":
-        url = "https://min-api.cryptocompare.com/data/v2/histohour"
-        aggregate = 1
-    else:  # 1d
-        url = "https://min-api.cryptocompare.com/data/v2/histoday"
-        aggregate = 1
+    base_url = "https://api.binance.com"
+    endpoint = "/api/v3/klines"
     
     # Set parameters
     params = {
-        "fsym": coin,
-        "tsym": "USD",
-        "limit": limit,
-        "aggregate": aggregate,
-        "api_key": API_KEY
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+    
+    # Add API key to headers
+    headers = {
+        "X-MBX-APIKEY": BINANCE_API_KEY
     }
     
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(f"{base_url}{endpoint}", params=params, headers=headers)
         data = response.json()
         
-        if data["Response"] == "Success":
-            df = pd.DataFrame(data["Data"]["Data"])
+        if isinstance(data, list):
+            # Convert to DataFrame
+            df = pd.DataFrame(data, columns=[
+                "OpenTime", "Open", "High", "Low", "Close", "Volume",
+                "CloseTime", "QuoteAssetVolume", "NumberOfTrades",
+                "TakerBuyBaseAssetVolume", "TakerBuyQuoteAssetVolume", "Ignore"
+            ])
             
             # Convert timestamp to datetime
-            df["time"] = pd.to_datetime(df["time"], unit="s")
+            df["OpenTime"] = pd.to_datetime(df["OpenTime"], unit="ms")
             
-            # Rename columns
-            df = df.rename(columns={
-                "time": "timestamp",
-                "volumefrom": "volume"
-            })
+            # Convert string values to float
+            for col in ["Open", "High", "Low", "Close", "Volume"]:
+                df[col] = df[col].astype(float)
             
-            # Save data as CSV
-            file_path = os.path.join(DATA_DIR, f"{coin}_data.csv")
+            # Select and rename columns
+            df = df[["OpenTime", "Open", "High", "Low", "Close", "Volume"]]
+            
+            # データを取得した後、インディケーターを計算
+            from entry_exit_point_generator import calculate_indicators
+            df = calculate_indicators(df)
+            
+            # インディケーターを含むデータを保存
+            file_path = os.path.join(DATA_DIR, f"{symbol}_{interval}_data.csv")
             df.to_csv(file_path, index=False)
             
-            print(f"Data for {coin} saved to {file_path}")
+            print(f"Data for {symbol} saved to {file_path}")
             return df
         else:
-            print(f"Error fetching data for {coin}: {data['Message']}")
+            print(f"Error fetching data for {symbol}: {data.get('msg', 'Unknown error')}")
             return None
     except Exception as e:
-        print(f"Exception when fetching data for {coin}: {str(e)}")
+        print(f"Exception when fetching data for {symbol}: {str(e)}")
         return None
 
-def collect_all_data(coins=COINS, interval="5m", limit=100):
+def get_latest_data(symbol: str = SYMBOL, interval: str = INTERVAL) -> Optional[pd.DataFrame]:
     """
-    Collect data for all cryptocurrencies
+    Get the latest OHLCV data for a symbol
     """
-    results = {}
-    for coin in coins:
-        print(f"Collecting data for {coin}...")
-        df = fetch_crypto_data(coin, limit, interval)
-        if df is not None:
-            results[coin] = df
-        # Short delay to avoid API rate limits
-        time.sleep(0.5)
-    
-    return results
+    return fetch_ohlc_data(symbol, interval, limit=100)
 
 if __name__ == "__main__":
-    # Collect data for all cryptocurrencies
-    collect_all_data()
+    # Test data fetching
+    df = get_latest_data()
+    if df is not None:
+        print("\nLatest data sample:")
+        print(df.head())

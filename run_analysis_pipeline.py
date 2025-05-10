@@ -1,151 +1,133 @@
 import os
+import json
 import argparse
 import pandas as pd
 from datetime import datetime
+from typing import Dict, Optional
 
-# Import all necessary modules
-from crypto_data_collector import collect_all_data
-from technical_indicator_analyzer import analyze_all_coins
-from trading_strategy_creator import create_trading_strategies
-from entry_exit_point_generator import generate_all_entry_exit_points
-from expanded_visualizations import create_visualization_for_all_coins
-from config import COINS
+from crypto_data_collector import get_latest_data
+from entry_exit_point_generator import (
+    calculate_indicators,
+    generate_signal,
+    generate_trade_parameters,
+    get_phase
+)
 from line_messaging_api import LineMessagingApi
+from config import (
+    SYMBOL,
+    INTERVAL,
+    INITIAL_BALANCE,
+    BALANCE_FILE,
+    ENABLE_LINE_NOTIFY,
+    LINE_CHANNEL_TOKEN,
+    LINE_USER_ID
+)
 
-# Retrieve LINE credentials from environment variables
-LINE_CHANNEL_TOKEN = os.environ.get('LINE_CHANNEL_TOKEN')
-LINE_USER_ID = os.environ.get('LINE_USER_ID')
-
-def run_analysis_pipeline(interval="5m", limit=100, send_line_notification=True):
+def load_balance() -> float:
     """
-    Run the complete cryptocurrency analysis pipeline
+    Load current balance from file
+    """
+    if os.path.exists(BALANCE_FILE):
+        with open(BALANCE_FILE, 'r') as f:
+            data = json.load(f)
+            return float(data.get('balance', INITIAL_BALANCE))
+    return INITIAL_BALANCE
+
+def save_balance(balance: float):
+    """
+    Save current balance to file
+    """
+    with open(BALANCE_FILE, 'w') as f:
+        json.dump({'balance': balance}, f)
+
+def format_trade_message(symbol: str, signal: Dict, trade_params: Dict) -> str:
+    """
+    Format trade message for LINE notification
+    """
+    return f"""{symbol} {'🚀' if signal['signal'] == 'BUY' else '📉'} {signal['signal']} @{trade_params['entry_price']:.2f}
+SL {trade_params['stop_loss']:.2f} / TP {trade_params['take_profit']:.2f}
+Size {trade_params['position_size']:.4f} (Bal ¥{trade_params['balance']:.0f})"""
+
+def run_analysis_pipeline(dry_run: bool = False):
+    """
+    Run the trading strategy pipeline
     
     Args:
-        interval: Time interval for data collection (1m, 5m, 15m, 30m, 1h, 1d)
-        limit: Number of data points to retrieve
-        send_line_notification: Whether to send results to LINE
+        dry_run: If True, only simulate the strategy without sending notifications
     """
     print("=" * 50)
-    print(f"CRYPTOCURRENCY ANALYSIS PIPELINE START: {datetime.now()}")
+    print(f"TRADING STRATEGY PIPELINE START: {datetime.now()}")
     print("=" * 50)
     
-    # Step 1: Collect cryptocurrency data
-    print("\n[STEP 1] Collecting cryptocurrency data...")
-    data_results = collect_all_data(COINS, interval, limit)
-    print(f"Data collection completed for {len(data_results)} cryptocurrencies.")
+    # Load current balance
+    balance = load_balance()
+    print(f"\nCurrent balance: ¥{balance:.0f}")
     
-    # Step 2: Perform technical analysis
-    print("\n[STEP 2] Performing technical analysis...")
-    analysis_results = analyze_all_coins(COINS)
-    print(f"Technical analysis completed for {len(analysis_results)} cryptocurrencies.")
+    # Get current phase
+    phase, lot_factor = get_phase(balance)
+    print(f"Current phase: {phase} (Lot factor: {lot_factor})")
     
-    # Step 3: Generate trading signals
-    print("\n[STEP 3] Generating trading signals...")
-    strategy_results, signals_df = create_trading_strategies(COINS)
-    print(f"Trading signals generated for {len(strategy_results)} cryptocurrencies.")
+    # Step 1: Get latest OHLCV data
+    print("\n[STEP 1] Fetching latest OHLCV data...")
+    df = get_latest_data()
+    if df is None:
+        print("❌ Failed to fetch data")
+        return
     
-    # Display trading signals summary
-    if not signals_df.empty:
-        print("\nTrading Signals Summary:")
-        print(signals_df[["coin", "signal", "confidence", "price", "rsi", "trend"]])
+    # Step 2: Calculate indicators
+    print("\n[STEP 2] Calculating indicators...")
+    df = calculate_indicators(df)
+    
+    # Step 3: Generate trading signal
+    print("\n[STEP 3] Generating trading signal...")
+    signal = generate_signal(df)
+    
+    if signal:
+        print(f"\nSignal generated: {signal['signal']} @ {signal['price']:.2f}")
         
-        # Count signals by type
-        signal_counts = signals_df["signal"].value_counts()
-        buy_count = signal_counts.get("BUY", 0)
-        sell_count = signal_counts.get("SELL", 0)
-        hold_count = signal_counts.get("HOLD", 0)
+        # Step 4: Generate trade parameters
+        print("\n[STEP 4] Generating trade parameters...")
+        trade_params = generate_trade_parameters(signal, balance)
         
-        print(f"\nSignal Distribution: BUY: {buy_count}, SELL: {sell_count}, HOLD: {hold_count}")
+        # Apply lot factor
+        trade_params['position_size'] *= lot_factor
         
-        # Determine market trend
-        if buy_count > sell_count:
-            market_trend = "BULLISH (Uptrend)"
-        elif sell_count > buy_count:
-            market_trend = "BEARISH (Downtrend)"
-        else:
-            market_trend = "NEUTRAL (Sideways)"
-            
-        print(f"Overall Market Trend: {market_trend}")
-    
-    # Step 4: Generate entry/exit points
-    print("\n[STEP 4] Generating entry/exit points...")
-    points_results, points_df = generate_all_entry_exit_points(COINS)
-    
-    if not points_df.empty:
-        print("\nEntry/Exit Points Summary:")
-        print(points_df[["coin", "signal", "confidence", "price", "entry_point", "exit_point", "stop_loss"]])
-    
-    # Step 5: Create visualizations
-    print("\n[STEP 5] Creating visualizations...")
-    charts_created = create_visualization_for_all_coins("analysis", signals_df)
-    print(f"Created {len(charts_created)} visualization charts.")
-    
-    # Step 6: Send LINE notification with results
-    if send_line_notification and not points_df.empty and LINE_CHANNEL_TOKEN and LINE_USER_ID:
-        print("\n[STEP 6] Sending LINE notification...")
-        try:
-            # Prepare summary data for LINE notification
-            summary_data = []
-            for _, row in points_df.iterrows():
-                summary_data.append({
-                    "coin": row["coin"],
-                    "signal": row["signal"],
-                    "confidence": row["confidence"],
-                    "price": row["price"],
-                    "entry_point": row["entry_point"],
-                    "exit_point": row["exit_point"]
-                })
-            
-            # Initialize LINE client using environment variables
-            line_client = LineMessagingApi(LINE_CHANNEL_TOKEN, LINE_USER_ID)
-            
-            # Send analysis report
-            result = line_client.send_analysis_report(summary_data)
-            
-            if result:
-                print("✅ LINE notification sent successfully!")
-            else:
-                print("❌ Failed to send LINE notification. Check logs and credentials.")
-        except Exception as e:
-            print(f"❌ Error sending LINE notification: {str(e)}")
-    elif send_line_notification:
-        print("\n[STEP 6] Skipped LINE notification: LINE_CHANNEL_TOKEN or LINE_USER_ID not set in environment variables.")
+        # Format message
+        message = format_trade_message(SYMBOL, signal, trade_params)
+        print(f"\nTrade message:\n{message}")
+        
+        # Step 5: Send LINE notification
+        if not dry_run and ENABLE_LINE_NOTIFY:
+            print("\n[STEP 5] Sending LINE notification...")
+            try:
+                line_client = LineMessagingApi(LINE_CHANNEL_TOKEN, LINE_USER_ID)
+                result = line_client.send_message(message)
+                
+                if result:
+                    print("✅ LINE notification sent successfully!")
+                else:
+                    print("❌ Failed to send LINE notification")
+            except Exception as e:
+                print(f"❌ Error sending LINE notification: {str(e)}")
+    else:
+        print("\nNo trading signal generated")
     
     print("\n" + "=" * 50)
-    print(f"CRYPTOCURRENCY ANALYSIS PIPELINE COMPLETE: {datetime.now()}")
+    print(f"TRADING STRATEGY PIPELINE COMPLETE: {datetime.now()}")
     print("=" * 50)
-    
-    return {
-        "data_results": data_results,
-        "analysis_results": analysis_results,
-        "strategy_results": strategy_results,
-        "signals_df": signals_df,
-        "points_results": points_results,
-        "points_df": points_df,
-        "charts_created": charts_created
-    }
 
 def parse_arguments():
     """
     Parse command line arguments
     """
-    parser = argparse.ArgumentParser(description="Cryptocurrency Technical Analysis Tool")
-    
-    parser.add_argument("--interval", type=str, default="5m",
-                        choices=["1m", "5m", "15m", "30m", "1h", "1d"],
-                        help="Time interval for data collection")
-    
-    parser.add_argument("--limit", type=int, default=100,
-                        help="Number of data points to retrieve")
-    
-    parser.add_argument("--no-line", action="store_true",
-                        help="Disable LINE notification")
-    
+    parser = argparse.ArgumentParser(description="Cryptocurrency Trading Strategy")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="Run in simulation mode without sending notifications")
     return parser.parse_args()
 
 if __name__ == "__main__":
     # Parse command line arguments
     args = parse_arguments()
     
-    # Run the complete analysis pipeline
-    results = run_analysis_pipeline(args.interval, args.limit, not args.no_line)
+    # Run the trading strategy pipeline
+    run_analysis_pipeline(args.dry_run)

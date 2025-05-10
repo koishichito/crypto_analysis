@@ -141,3 +141,147 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+# Cryptocurrency Trading Strategy
+
+This project implements an automated trading strategy for Binance Futures (BTCUSDT) using Donchian Channels, ADX, and ATR for risk management.
+
+## Strategy Overview
+
+The strategy combines:
+- Donchian Channel breakout signals
+- ADX trend filter
+- ATR-based risk management
+- 10x leverage with compound position sizing
+- Phase-based lot size adjustment
+
+### Key Components
+
+1. **Entry Signals**:
+   - Donchian Channel (20-period) breakout
+   - ADX (14-period) > 25 for trend confirmation
+
+2. **Risk Management**:
+   - Stop Loss: ±1.5 × ATR from entry
+   - Take Profit: ±3.0 × ATR from entry
+   - Position Size: 4% of balance per trade (10x leverage)
+
+3. **Phase Management**:
+   - Phase 1: ¥15,000 → ¥25,000
+   - Phase 2: ¥25,000 → ¥40,000
+   - Phase 3: ¥40,000 → ¥50,000
+
+## Project Structure
+
+```
+crypto_analysis/
+├── data/                       # Collected cryptocurrency data
+├── logs/                       # Trading logs
+├── config.py                   # Configuration settings
+├── crypto_data_collector.py    # Binance data collection
+├── entry_exit_point_generator.py    # Strategy implementation
+├── line_messaging_api.py       # LINE notification
+├── run_analysis_pipeline.py    # Main orchestrator
+└── requirements.txt            # Python dependencies
+```
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd crypto_analysis
+```
+
+2. Install the required dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Set up your API keys in `config.py` or environment variables:
+```bash
+# .env file
+BINANCE_API_KEY=your_binance_api_key
+BINANCE_API_SECRET=your_binance_api_secret
+LINE_CHANNEL_TOKEN=your_line_channel_token
+LINE_USER_ID=your_line_user_id
+ENABLE_LINE_NOTIFY=true
+```
+
+## Usage
+
+### Running the Strategy
+
+To run the strategy in simulation mode:
+```bash
+python run_analysis_pipeline.py --dry-run
+```
+
+To run with real notifications:
+```bash
+python run_analysis_pipeline.py
+```
+
+### Strategy Parameters
+
+Key parameters can be adjusted in `config.py`:
+
+```python
+# Trading parameters
+SYMBOL = "BTCUSDT"
+INTERVAL = "1h"
+LEVERAGE = 10
+INITIAL_BALANCE = 15000  # JPY
+
+# Strategy parameters
+DONCHIAN_PERIOD = 20
+ADX_PERIOD = 14
+ADX_THRESHOLD = 25
+ATR_PERIOD = 14
+ATR_MULTIPLIER_SL = 1.5
+ATR_MULTIPLIER_TP = 3.0
+POSITION_SIZE_PERCENT = 0.04
+
+# Phase management
+PHASE_THRESHOLDS = [25000, 40000, 50000]  # JPY
+PHASE_LOT_FACTOR = {1: 1.0, 2: 1.0, 3: 1.0}
+```
+
+### LINE Notifications
+
+The strategy sends notifications for:
+- New trading signals
+- Phase transitions
+- Trade execution details
+
+Example notification:
+```
+BTCUSDT 🚀 BUY @50000.00
+SL 49800.00 / TP 50400.00
+Size 0.1000 (Bal ¥15000)
+```
+
+## Automated Execution
+
+The strategy can be run automatically using GitHub Actions:
+
+1. Set up repository secrets:
+   - `BINANCE_API_KEY`
+   - `BINANCE_API_SECRET`
+   - `LINE_CHANNEL_TOKEN`
+   - `LINE_USER_ID`
+
+2. The workflow runs every hour to check for new signals
+
+## Risk Warning
+
+This strategy involves significant risk. Always:
+- Start with small position sizes
+- Monitor performance closely
+- Be prepared for drawdowns
+- Never risk more than you can afford to lose
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+# cryptodonchian
